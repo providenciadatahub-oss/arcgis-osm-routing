@@ -8,9 +8,9 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.json({ limit: '50mb' }));
 
 // ======================================================================
-// 0. EL PING DE SEGURIDAD (El que te estaba dando 404)
+// 0. EL PING DE SEGURIDAD (CORREGIDO: Ahora sí responde al GET del navegador)
 // ======================================================================
-app.all('/arcgis/rest/info', (req, res) => {
+app.get('/arcgis/rest/info', (req, res) => {
     res.json({
         currentVersion: 10.81,
         fullVersion: "10.8.1",
