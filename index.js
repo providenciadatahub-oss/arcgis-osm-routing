@@ -8,7 +8,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.json({ limit: '50mb' }));
 
 // ======================================================================
-// 0. EL PING DE SEGURIDAD (CORREGIDO: Ahora sí responde al GET del navegador)
+// 0. EL PING DE SEGURIDAD PARA EXPERIENCE BUILDER
 // ======================================================================
 app.get('/arcgis/rest/info', (req, res) => {
     res.json({
@@ -115,4 +115,4 @@ app.all('/arcgis/rest/services/World/Route/NAServer/Route_World/solve', async (r
 });
 
 const port = process.env.PORT || 8080;
-app.listen(port, () => console.log(`Proxy (Geocodificador + POST Ruteo) activo`));
+app.listen(port, () => console.log(`Proxy Total Activo en puerto ${port}`));
