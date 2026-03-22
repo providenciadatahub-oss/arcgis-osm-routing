@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 
 // ======================================================================
-// 1. GEOCODIFICADOR (Buscador Nominatim)
+// 1. GEOCODIFICADOR (Nominatim)
 // ======================================================================
 app.get('/arcgis/rest/services/Nominatim/GeocodeServer', (req, res) => {
     res.json({
@@ -41,40 +41,53 @@ app.get('/arcgis/rest/services/Nominatim/GeocodeServer/findAddressCandidates', a
         
         res.json({ spatialReference: { wkid: 4326 }, candidates });
     } catch (error) {
-        res.status(500).json({ error: "Error de red en Geocode" });
+        res.status(500).json({ error: "Error de red" });
     }
 });
 
 // ======================================================================
-// 2. RUTAS (El Fix para "Incompatible")
+// 2. RUTAS (El Fix Definitivo para "Incompatible")
 // ======================================================================
+
+// El objeto "Travel Mode" exacto que exige Experience Builder
+const travelModeExacto = {
+    "id": "1",
+    "name": "Driving Time",
+    "description": "Tiempo de conducción OSRM",
+    "type": "AUTOMOBILE",
+    "impedanceAttributeName": "TravelTime", // <-- CRÍTICO
+    "timeAttributeName": "TravelTime",      // <-- CRÍTICO
+    "distanceAttributeName": "Kilometers"   // <-- CRÍTICO
+};
 
 // Pasaporte Raíz (NAServer)
 app.get('/arcgis/rest/services/OSRM/NAServer', (req, res) => {
     res.json({
         currentVersion: 10.81,
-        serviceDescription: "OSRM Routing Service",
+        serviceDescription: "OSRM Routing Proxy",
         routeLayers: ["Route"],
-        capabilities: "Route,NetworkAnalysis"
+        serviceAreaLayers: [],      // <-- CRÍTICO (Evita el cuelgue del widget)
+        closestFacilityLayers: [],  // <-- CRÍTICO
+        asyncLocationDirLayers: [],
+        syncLocationDirLayers: [],
+        defaultTravelMode: "Driving Time",
+        supportedTravelModes: [travelModeExacto],
+        capabilities: "Route,NetworkAnalysis",
+        spatialReference: { wkid: 4326, latestWkid: 4326 }
     });
 });
 
-// Pasaporte de la Capa (Route) - ¡AQUÍ ESTÁ LO QUE EXIGE EXPERIENCE BUILDER!
+// Pasaporte de la Capa (Route)
 app.get('/arcgis/rest/services/OSRM/NAServer/Route', (req, res) => {
     res.json({
         currentVersion: 10.81,
         layerName: "Route",
+        layerType: "esriNAServerRouteLayer", // <-- ¡EL TIPO EXACTO QUE BUSCA ESRI!
+        routeLayerName: "Route",
+        networkDatasetName: "Routing_ND",
+        defaultTravelMode: "Driving Time",
+        supportedTravelModes: [travelModeExacto],
         capabilities: "Route",
-        defaultTravelMode: "Driving",
-        // Sin esto, Experience Builder dice "Incompatible":
-        supportedTravelModes: [
-            {
-                id: "1",
-                name: "Driving",
-                description: "Conducción en automóvil",
-                type: "AUTOMOBILE"
-            }
-        ],
         spatialReference: { wkid: 4326, latestWkid: 4326 }
     });
 });
@@ -94,22 +107,27 @@ app.get('/arcgis/rest/services/OSRM/NAServer/Route/solve', async (req, res) => {
         }
 
         const route = response.data.routes[0];
+        const minutes = route.duration / 60;
+        const kilometers = route.distance / 1000;
 
         res.json({
             messages: [],
             routes: {
+                spatialReference: { wkid: 4326, latestWkid: 4326 },
                 features: [{
                     attributes: {
                         Name: "Ruta OSRM",
-                        Total_Minutes: route.duration / 60,
-                        Total_Kilometers: route.distance / 1000
+                        // Deben coincidir con los nombres de impedancia
+                        TravelTime: minutes,
+                        Total_TravelTime: minutes,
+                        Kilometers: kilometers,
+                        Total_Kilometers: kilometers
                     },
                     geometry: {
                         paths: [route.geometry.coordinates], 
-                        spatialReference: { wkid: 4326 }
+                        spatialReference: { wkid: 4326, latestWkid: 4326 }
                     }
-                }],
-                spatialReference: { wkid: 4326 }
+                }]
             }
         });
     } catch (error) {
@@ -118,4 +136,4 @@ app.get('/arcgis/rest/services/OSRM/NAServer/Route/solve', async (req, res) => {
 });
 
 const port = process.env.PORT || 8080;
-app.listen(port, () => console.log(`Proxy (Geocodificador + Rutas ArcGIS) activo`));
+app.listen(port, () => console.log(`Proxy (Geocodificador + Rutas Clon ArcGIS) activo`));
