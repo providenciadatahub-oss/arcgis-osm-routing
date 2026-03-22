@@ -1,5 +1,5 @@
 {
-  "name": "arcgis-georoute-proxy",
+  "name": "arcgis-osm-proxy",
   "version": "1.0.0",
   "main": "index.js",
   "dependencies": {
