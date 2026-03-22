@@ -5,21 +5,31 @@ const app = express();
 
 app.use(cors());
 
+// NUEVO: Middleware para procesar las peticiones POST y JSON que manda Esri en secreto
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(express.json({ limit: '50mb' }));
+
+// ======================================================================
+// 0. EL PING DE SEGURIDAD (Lo que revisa ArcGIS Online al agregar la URL)
+// ======================================================================
+app.get('/arcgis/rest/info', (req, res) => {
+    res.json({
+        currentVersion: 10.81,
+        fullVersion: "10.8.1",
+        authInfo: { isTokenBasedSecurity: false }
+    });
+});
+
 // ======================================================================
 // 1. GEOCODIFICADOR (Nominatim)
 // ======================================================================
 app.get('/arcgis/rest/services/Nominatim/GeocodeServer', (req, res) => {
     res.json({
-        currentVersion: 10.81,
-        serviceDescription: "Nominatim Proxy Geocoder",
-        addressTypes: ["StreetAddress"],
-        capabilities: "Geocode",
+        currentVersion: 10.81, serviceDescription: "Nominatim Proxy Geocoder",
+        addressTypes: ["StreetAddress"], capabilities: "Geocode",
         spatialReference: { wkid: 4326, latestWkid: 4326 },
         singleLineAddressField: { name: "SingleLine", type: "esriFieldTypeString" },
-        candidateFields: [
-            { name: "Shape", type: "esriFieldTypeGeometry" },
-            { name: "Match_addr", type: "esriFieldTypeString" }
-        ]
+        candidateFields: [ { name: "Shape", type: "esriFieldTypeGeometry" }, { name: "Match_addr", type: "esriFieldTypeString" } ]
     });
 });
 
@@ -29,86 +39,67 @@ app.get('/arcgis/rest/services/Nominatim/GeocodeServer/findAddressCandidates', a
     try {
         const response = await axios.get(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5`);
         const candidates = response.data.map(item => ({
-            address: item.display_name,
-            location: { x: parseFloat(item.lon), y: parseFloat(item.lat) },
-            score: 100,
-            attributes: { Match_addr: item.display_name }
+            address: item.display_name, location: { x: parseFloat(item.lon), y: parseFloat(item.lat) },
+            score: 100, attributes: { Match_addr: item.display_name }
         }));
         res.json({ spatialReference: { wkid: 4326 }, candidates });
-    } catch (error) {
-        res.status(500).json({ error: "Error de red" });
-    }
+    } catch (error) { res.status(500).json({ error: "Error de red" }); }
 });
 
 // ======================================================================
-// 2. RUTAS: DISFRAZ DE "WORLD ROUTING SERVICE" DE ESRI
+// 2. RUTAS: DISFRAZ DE "WORLD ROUTING SERVICE" (Soporte GET y POST)
 // ======================================================================
-
 const networkAttributesExactos = [
     { name: "TravelTime", usageType: "esriNAUTCost", dataType: "esriNADTDouble", units: "esriNAUMinutes" },
     { name: "Kilometers", usageType: "esriNAUTCost", dataType: "esriNADTDouble", units: "esriNAUKilometers" }
 ];
-
 const travelModesExactos = [
     { id: "1", name: "Tiempo de conducción", type: "AUTOMOBILE", impedanceAttributeName: "TravelTime", timeAttributeName: "TravelTime", distanceAttributeName: "Kilometers" },
-    { id: "2", name: "Distancia de conducción", type: "AUTOMOBILE", impedanceAttributeName: "Kilometers", timeAttributeName: "TravelTime", distanceAttributeName: "Kilometers" },
-    { id: "3", name: "Tiempo en camión", type: "TRUCK", impedanceAttributeName: "TravelTime", timeAttributeName: "TravelTime", distanceAttributeName: "Kilometers" },
-    { id: "4", name: "Distancia en camión", type: "TRUCK", impedanceAttributeName: "Kilometers", timeAttributeName: "TravelTime", distanceAttributeName: "Kilometers" },
-    { id: "5", name: "Tiempo a pie", type: "WALK", impedanceAttributeName: "TravelTime", timeAttributeName: "TravelTime", distanceAttributeName: "Kilometers" },
-    { id: "6", name: "Distancia a pie", type: "WALK", impedanceAttributeName: "Kilometers", timeAttributeName: "TravelTime", distanceAttributeName: "Kilometers" }
+    { id: "5", name: "Tiempo a pie", type: "WALK", impedanceAttributeName: "TravelTime", timeAttributeName: "TravelTime", distanceAttributeName: "Kilometers" }
 ];
 
-// Configuración disfrazada como "Route_World"
 const configuracionRuta = {
-    currentVersion: 10.81,
-    layerName: "Route_World",             // <-- DISFRAZ: Nombre idéntico al de Esri
-    layerType: "esriNAServerRouteLayer", 
-    routeLayerName: "Route_World",        // <-- DISFRAZ: Nombre idéntico al de Esri
-    impedance: "TravelTime",
-    distanceUnits: "esriKilometers",
-    restrictUTurns: "esriNFSBAllowBacktrack",
-    outputLineType: "esriNAOutputLineTrueShape",
-    supportsStartTime: true,              
-    timeZoneForTimeWindows: "esriNTSLocal", 
-    trafficSupport: "esriNTSNone",          
-    defaultTravelMode: "Tiempo de conducción",
-    supportedTravelModes: travelModesExactos, 
-    networkAttributes: networkAttributesExactos,
-    directionsSupported: true,                  
-    supportedDirectionsLanguages: ["es", "en"], 
-    capabilities: "Route,NetworkAnalysis",
-    spatialReference: { wkid: 4326, latestWkid: 4326 }
+    currentVersion: 10.81, layerName: "Route_World", layerType: "esriNAServerRouteLayer", routeLayerName: "Route_World",
+    impedance: "TravelTime", distanceUnits: "esriKilometers", restrictUTurns: "esriNFSBAllowBacktrack",
+    outputLineType: "esriNAOutputLineTrueShape", supportsStartTime: true, timeZoneForTimeWindows: "esriNTSLocal", 
+    trafficSupport: "esriNTSNone", defaultTravelMode: "Tiempo de conducción",
+    supportedTravelModes: travelModesExactos, networkAttributes: networkAttributesExactos,
+    directionsSupported: true, supportedDirectionsLanguages: ["es", "en"], 
+    capabilities: "Route,NetworkAnalysis", spatialReference: { wkid: 4326, latestWkid: 4326 }
 };
 
-// 2.1 Pasaporte Raíz (World/Route/NAServer)
-app.get('/arcgis/rest/services/World/Route/NAServer', (req, res) => {
-    res.json({
-        ...configuracionRuta,
-        routeLayers: ["Route_World"],
-        serviceAreaLayers: [],      
-        closestFacilityLayers: [] 
-    });
-});
+// Pasaportes
+app.get('/arcgis/rest/services/World/Route/NAServer', (req, res) => res.json({ ...configuracionRuta, routeLayers: ["Route_World"], serviceAreaLayers: [], closestFacilityLayers: [] }));
+app.get('/arcgis/rest/services/World/Route/NAServer/Route_World', (req, res) => res.json(configuracionRuta));
 
-// 2.2 Pasaporte de la Capa (World/Route/NAServer/Route_World)
-app.get('/arcgis/rest/services/World/Route/NAServer/Route_World', (req, res) => {
-    res.json(configuracionRuta);
-});
+// Motor de Cálculo (NUEVO: Usa app.all para atrapar POST y GET)
+app.all('/arcgis/rest/services/World/Route/NAServer/Route_World/solve', async (req, res) => {
+    // Atrapamos las paradas sin importar si vienen por URL o por paquete oculto
+    const stopsParam = req.query.stops || req.body.stops; 
+    if (!stopsParam) return res.status(400).json({ error: "Faltan paradas" });
 
-// 2.3 Motor de Cálculo (World/Route/NAServer/Route_World/solve)
-app.get('/arcgis/rest/services/World/Route/NAServer/Route_World/solve', async (req, res) => {
-    const stops = req.query.stops; 
-    if (!stops) return res.status(400).json({ error: "Faltan paradas" });
-
-    let modeString = String(req.query.travelMode || "");
-    let profile = 'driving'; 
-    if (modeString.includes("5") || modeString.includes("6") || modeString.includes("pie") || modeString.includes("WALK")) {
-        profile = 'foot'; 
+    let osrmStops = "";
+    try {
+        // Magia Negra: Si ArcGIS manda un FeatureSet JSON, le extraemos la X y la Y
+        let stopsJson = typeof stopsParam === 'string' ? JSON.parse(stopsParam) : stopsParam;
+        if (stopsJson.features && stopsJson.features.length > 0) {
+            let coords = stopsJson.features.map(f => `${f.geometry.x},${f.geometry.y}`);
+            osrmStops = coords.join(';');
+        }
+    } catch (e) {
+        // Si no es JSON, asumimos formato básico
+        osrmStops = String(stopsParam).replace(/;/g, '|').replace(/\|/g, ';');
     }
 
+    if (!osrmStops || !osrmStops.includes(',')) {
+        return res.json({ messages: ["Formato de paradas no reconocido por el proxy"] });
+    }
+
+    let modeString = String(req.query.travelMode || req.body.travelMode || "");
+    let profile = (modeString.includes("5") || modeString.includes("WALK")) ? 'foot' : 'driving';
+
     try {
-        const cleanStops = stops.replace(/;/g, '|'); 
-        const osrmUrl = `http://router.project-osrm.org/route/v1/${profile}/${cleanStops}?overview=full&geometries=geojson`;
+        const osrmUrl = `http://router.project-osrm.org/route/v1/${profile}/${osrmStops}?overview=full&geometries=geojson`;
         const response = await axios.get(osrmUrl);
 
         if (!response.data.routes || response.data.routes.length === 0) {
@@ -124,30 +115,17 @@ app.get('/arcgis/rest/services/World/Route/NAServer/Route_World/solve', async (r
             routes: {
                 spatialReference: { wkid: 4326, latestWkid: 4326 },
                 features: [{
-                    attributes: {
-                        Name: "Ruta Generada",
-                        TravelTime: minutes,
-                        Total_TravelTime: minutes,
-                        Kilometers: kilometers,
-                        Total_Kilometers: kilometers
-                    },
-                    geometry: {
-                        paths: [route.geometry.coordinates], 
-                        spatialReference: { wkid: 4326, latestWkid: 4326 }
-                    }
+                    attributes: { Name: "Ruta OSRM", TravelTime: minutes, Total_TravelTime: minutes, Kilometers: kilometers, Total_Kilometers: kilometers },
+                    geometry: { paths: [route.geometry.coordinates], spatialReference: { wkid: 4326, latestWkid: 4326 } }
                 }]
             },
             directions: [{
-                routeId: 1,
-                routeName: "Ruta",
-                summary: { totalLength: kilometers, totalTime: minutes, totalDriveTime: minutes },
+                routeId: 1, routeName: "Ruta", summary: { totalLength: kilometers, totalTime: minutes, totalDriveTime: minutes },
                 features: [{ attributes: { text: "Siga la ruta trazada en el mapa.", length: kilometers, time: minutes, maneuverType: "esriDMTUnknown" } }]
             }]
         });
-    } catch (error) {
-        res.status(500).json({ error: "Error en Routing" });
-    }
+    } catch (error) { res.status(500).json({ error: "Error conectando con OSRM" }); }
 });
 
 const port = process.env.PORT || 8080;
-app.listen(port, () => console.log(`Proxy (Geocodificador + Disfraz World Routing) activo`));
+app.listen(port, () => console.log(`Proxy (Geocodificador + POST Ruteo) activo`));
