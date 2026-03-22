@@ -5,24 +5,37 @@ const app = express();
 
 app.use(cors());
 
-// 1. Endpoint de "Handshake" (Para que ArcGIS reconozca que es un servidor de rutas)
-app.get('/osrm/rest/services/OSRM/NAServer/Route', (req, res) => {
+// 1. EL "PASAPORTE" PARA ARCGIS (Root NAServer)
+// Esto es lo que ArcGIS revisa cuando intentas agregar el elemento por URL
+app.get('/osrm/rest/services/OSRM/NAServer', (req, res) => {
     res.json({
         currentVersion: 10.81,
-        serviceName: "OSRM Route Proxy",
-        capabilities: "Route",
-        networkDatasetName: "OpenStreetMap Network",
-        supportedTravelModes: [{ name: "Driving", id: "1" }]
+        serviceDescription: "OSRM Routing Service",
+        routeLayers: ["Route"],
+        capabilities: "Route"
     });
 });
 
-// 2. Endpoint de Cálculo (El que dibuja la línea)
+// 2. LA CAPA DE RUTA (Route Layer)
+app.get('/osrm/rest/services/OSRM/NAServer/Route', (req, res) => {
+    res.json({
+        currentVersion: 10.81,
+        layerName: "Route",
+        defaultTravelMode: "Driving",
+        capabilities: "Route",
+        networkDatasetName: "Routing_ND"
+    });
+});
+
+// 3. EL MOTOR DE CÁLCULO (Solve) - El que hace el trabajo gratis
 app.get('/osrm/rest/services/OSRM/NAServer/Route/solve', async (req, res) => {
-    const stops = req.query.stops; // ArcGIS envía las paradas como "lon,lat;lon,lat"
+    const stops = req.query.stops; 
     if (!stops) return res.status(400).json({ error: "Faltan paradas (stops)" });
 
     try {
-        // Consultamos la API pública y gratuita de OSRM
+        // ArcGIS manda las paradas con un formato extraño a veces, las limpiamos:
+        const cleanStops = stops.replace(/;/g, '|'); // Por si manda punto y coma
+        
         const osrmUrl = `http://router.project-osrm.org/route/v1/driving/${stops}?overview=full&geometries=geojson`;
         const response = await axios.get(osrmUrl);
 
@@ -32,28 +45,28 @@ app.get('/osrm/rest/services/OSRM/NAServer/Route/solve', async (req, res) => {
 
         const route = response.data.routes[0];
 
-        // Traducimos el GeoJSON al formato "Esri Polyline"
-        const arcgisResponse = {
+        // Traducimos a formato ArcGIS
+        res.json({
+            messages: [],
             routes: {
                 features: [{
+                    attributes: {
+                        Name: "Ruta OSRM",
+                        Total_Minutes: route.duration / 60,
+                        Total_Kilometers: route.distance / 1000
+                    },
                     geometry: {
                         paths: [route.geometry.coordinates], 
                         spatialReference: { wkid: 4326 }
-                    },
-                    attributes: {
-                        Total_Minutes: route.duration / 60,
-                        Total_Kilometers: route.distance / 1000
                     }
-                }]
+                }],
+                spatialReference: { wkid: 4326 }
             }
-        };
-
-        res.json(arcgisResponse);
+        });
     } catch (error) {
-        console.error("Error consultando OSRM:", error.message);
         res.status(500).json({ error: "Error de red en Routing" });
     }
 });
 
 const port = process.env.PORT || 8080;
-app.listen(port, () => console.log(`Proxy de Rutas OSRM Activo en puerto ${port}`));
+app.listen(port, () => console.log(`Proxy OSRM con Pasaporte ArcGIS activo en puerto ${port}`));
