@@ -1,4 +1,4 @@
-const Koop = require('@koopjs/koop')
+const Koop = require('koop') // <--- Cambiado de @koopjs/koop a koop
 const osrm = require('@koopjs/provider-osrm')
 const express = require('express')
 
@@ -19,6 +19,5 @@ app.use((req, res, next) => {
 // Koop servirá las rutas bajo el path /osrm
 app.use(koop.server)
 
-// Render detecta el puerto automáticamente
 const port = process.env.PORT || 8080
 app.listen(port, () => console.log(`Proxy de Rutas Providencia Activo`))
