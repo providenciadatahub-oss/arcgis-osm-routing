@@ -1,7 +1,88 @@
 {
-  "currentVersion": 10.8,
-  "serviceDescription": "...",
-  "routeLayers": ["Route"],
-  "serviceAreaLayers": ["Service Area"],
-  "closestFacilityLayers": ["Closest Facility"]
+  "currentVersion": 10.81,
+  "layerName": "Route",
+  "layerType": "esriNAServerRouteLayer",
+  "routeLayerName": "Route",
+  "impedance": "TravelTime",
+  "distanceUnits": "esriKilometers",
+  "restrictUTurns": "esriNFSBAllowBacktrack",
+  "outputLineType": "esriNAOutputLineTrueShape",
+  "supportsStartTime": true,
+  "timeZoneForTimeWindows": "esriNTSLocal",
+  "trafficSupport": "esriNTSNone",
+  "defaultTravelMode": "Tiempo de conducción",
+  "supportedTravelModes": [
+    {
+      "id": "1",
+      "name": "Tiempo de conducción",
+      "type": "AUTOMOBILE",
+      "impedanceAttributeName": "TravelTime",
+      "timeAttributeName": "TravelTime",
+      "distanceAttributeName": "Kilometers"
+    },
+    {
+      "id": "2",
+      "name": "Distancia de conducción",
+      "type": "AUTOMOBILE",
+      "impedanceAttributeName": "Kilometers",
+      "timeAttributeName": "TravelTime",
+      "distanceAttributeName": "Kilometers"
+    },
+    {
+      "id": "3",
+      "name": "Tiempo en camión",
+      "type": "TRUCK",
+      "impedanceAttributeName": "TravelTime",
+      "timeAttributeName": "TravelTime",
+      "distanceAttributeName": "Kilometers"
+    },
+    {
+      "id": "4",
+      "name": "Distancia en camión",
+      "type": "TRUCK",
+      "impedanceAttributeName": "Kilometers",
+      "timeAttributeName": "TravelTime",
+      "distanceAttributeName": "Kilometers"
+    },
+    {
+      "id": "5",
+      "name": "Tiempo a pie",
+      "type": "WALK",
+      "impedanceAttributeName": "TravelTime",
+      "timeAttributeName": "TravelTime",
+      "distanceAttributeName": "Kilometers"
+    },
+    {
+      "id": "6",
+      "name": "Distancia a pie",
+      "type": "WALK",
+      "impedanceAttributeName": "Kilometers",
+      "timeAttributeName": "TravelTime",
+      "distanceAttributeName": "Kilometers"
+    }
+  ],
+  "networkAttributes": [
+    {
+      "name": "TravelTime",
+      "usageType": "esriNAUTCost",
+      "dataType": "esriNADTDouble",
+      "units": "esriNAUMinutes"
+    },
+    {
+      "name": "Kilometers",
+      "usageType": "esriNAUTCost",
+      "dataType": "esriNADTDouble",
+      "units": "esriNAUKilometers"
+    }
+  ],
+  "directionsSupported": true,
+  "supportedDirectionsLanguages": [
+    "es",
+    "en"
+  ],
+  "capabilities": "Route,NetworkAnalysis",
+  "spatialReference": {
+    "wkid": 4326,
+    "latestWkid": 4326
+  }
 }
