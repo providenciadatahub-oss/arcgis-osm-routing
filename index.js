@@ -4,19 +4,21 @@ const cors = require('cors');
 const app = express();
 
 app.use(cors());
-
-// NUEVO: Middleware para procesar las peticiones POST y JSON que manda Esri en secreto
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.json({ limit: '50mb' }));
 
 // ======================================================================
-// 0. EL PING DE SEGURIDAD (Lo que revisa ArcGIS Online al agregar la URL)
+// 0. EL PING DE SEGURIDAD (El que te estaba dando 404)
 // ======================================================================
-app.get('/arcgis/rest/info', (req, res) => {
+app.all('/arcgis/rest/info', (req, res) => {
     res.json({
         currentVersion: 10.81,
         fullVersion: "10.8.1",
-        authInfo: { isTokenBasedSecurity: false }
+        owningSystemUrl: "https://arcgis-osm-proxy.onrender.com",
+        authInfo: { 
+            isTokenBasedSecurity: false,
+            tokenServicesUrl: ""
+        }
     });
 });
 
@@ -47,7 +49,7 @@ app.get('/arcgis/rest/services/Nominatim/GeocodeServer/findAddressCandidates', a
 });
 
 // ======================================================================
-// 2. RUTAS: DISFRAZ DE "WORLD ROUTING SERVICE" (Soporte GET y POST)
+// 2. RUTAS: DISFRAZ DE "WORLD ROUTING SERVICE"
 // ======================================================================
 const networkAttributesExactos = [
     { name: "TravelTime", usageType: "esriNAUTCost", dataType: "esriNADTDouble", units: "esriNAUMinutes" },
@@ -68,32 +70,25 @@ const configuracionRuta = {
     capabilities: "Route,NetworkAnalysis", spatialReference: { wkid: 4326, latestWkid: 4326 }
 };
 
-// Pasaportes
 app.get('/arcgis/rest/services/World/Route/NAServer', (req, res) => res.json({ ...configuracionRuta, routeLayers: ["Route_World"], serviceAreaLayers: [], closestFacilityLayers: [] }));
 app.get('/arcgis/rest/services/World/Route/NAServer/Route_World', (req, res) => res.json(configuracionRuta));
 
-// Motor de Cálculo (NUEVO: Usa app.all para atrapar POST y GET)
 app.all('/arcgis/rest/services/World/Route/NAServer/Route_World/solve', async (req, res) => {
-    // Atrapamos las paradas sin importar si vienen por URL o por paquete oculto
     const stopsParam = req.query.stops || req.body.stops; 
     if (!stopsParam) return res.status(400).json({ error: "Faltan paradas" });
 
     let osrmStops = "";
     try {
-        // Magia Negra: Si ArcGIS manda un FeatureSet JSON, le extraemos la X y la Y
         let stopsJson = typeof stopsParam === 'string' ? JSON.parse(stopsParam) : stopsParam;
         if (stopsJson.features && stopsJson.features.length > 0) {
             let coords = stopsJson.features.map(f => `${f.geometry.x},${f.geometry.y}`);
             osrmStops = coords.join(';');
         }
     } catch (e) {
-        // Si no es JSON, asumimos formato básico
         osrmStops = String(stopsParam).replace(/;/g, '|').replace(/\|/g, ';');
     }
 
-    if (!osrmStops || !osrmStops.includes(',')) {
-        return res.json({ messages: ["Formato de paradas no reconocido por el proxy"] });
-    }
+    if (!osrmStops || !osrmStops.includes(',')) return res.json({ messages: ["Formato de paradas no reconocido"] });
 
     let modeString = String(req.query.travelMode || req.body.travelMode || "");
     let profile = (modeString.includes("5") || modeString.includes("WALK")) ? 'foot' : 'driving';
@@ -102,9 +97,7 @@ app.all('/arcgis/rest/services/World/Route/NAServer/Route_World/solve', async (r
         const osrmUrl = `http://router.project-osrm.org/route/v1/${profile}/${osrmStops}?overview=full&geometries=geojson`;
         const response = await axios.get(osrmUrl);
 
-        if (!response.data.routes || response.data.routes.length === 0) {
-            return res.json({ messages: ["No se encontró ruta"] });
-        }
+        if (!response.data.routes || response.data.routes.length === 0) return res.json({ messages: ["No se encontró ruta"] });
 
         const route = response.data.routes[0];
         const minutes = route.duration / 60;
@@ -114,15 +107,9 @@ app.all('/arcgis/rest/services/World/Route/NAServer/Route_World/solve', async (r
             messages: [],
             routes: {
                 spatialReference: { wkid: 4326, latestWkid: 4326 },
-                features: [{
-                    attributes: { Name: "Ruta OSRM", TravelTime: minutes, Total_TravelTime: minutes, Kilometers: kilometers, Total_Kilometers: kilometers },
-                    geometry: { paths: [route.geometry.coordinates], spatialReference: { wkid: 4326, latestWkid: 4326 } }
-                }]
+                features: [{ attributes: { Name: "Ruta OSRM", TravelTime: minutes, Total_TravelTime: minutes, Kilometers: kilometers, Total_Kilometers: kilometers }, geometry: { paths: [route.geometry.coordinates], spatialReference: { wkid: 4326, latestWkid: 4326 } } }]
             },
-            directions: [{
-                routeId: 1, routeName: "Ruta", summary: { totalLength: kilometers, totalTime: minutes, totalDriveTime: minutes },
-                features: [{ attributes: { text: "Siga la ruta trazada en el mapa.", length: kilometers, time: minutes, maneuverType: "esriDMTUnknown" } }]
-            }]
+            directions: [{ routeId: 1, routeName: "Ruta", summary: { totalLength: kilometers, totalTime: minutes, totalDriveTime: minutes }, features: [{ attributes: { text: "Siga la ruta trazada.", length: kilometers, time: minutes, maneuverType: "esriDMTUnknown" } }] }]
         });
     } catch (error) { res.status(500).json({ error: "Error conectando con OSRM" }); }
 });
