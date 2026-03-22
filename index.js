@@ -8,7 +8,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.json({ limit: '50mb' }));
 
 // ======================================================================
-// 0. PING DE SEGURIDAD (Obligatorio para que Experience Builder no bloquee)
+// 0. PING DE SEGURIDAD (Obligatorio para Experience Builder)
 // ======================================================================
 app.get('/arcgis/rest/info', (req, res) => {
     res.json({
@@ -28,7 +28,7 @@ app.get('/arcgis/rest/services/Nominatim/GeocodeServer', (req, res) => {
         currentVersion: 10.81,
         serviceDescription: "Nominatim Proxy para ArcGIS Online",
         addressTypes: ["StreetAddress"],
-        capabilities: "Geocode,Suggest", // <-- Agregamos Suggest aquí
+        capabilities: "Geocode,Suggest",
         spatialReference: { wkid: 4326, latestWkid: 4326 },
         locatorProperties: { MaxBatchSize: 100, MaxResultSize: 100 },
         locators: [],
@@ -64,7 +64,7 @@ app.get('/arcgis/rest/services/Nominatim/GeocodeServer/findAddressCandidates', a
     }
 });
 
-// NUEVO: Autocompletado (suggest) - Esto evita los errores 404 al teclear
+// Autocompletado (suggest)
 app.get('/arcgis/rest/services/Nominatim/GeocodeServer/suggest', async (req, res) => {
     const text = req.query.text || "";
     if (!text) return res.json({ suggestions: [] });
@@ -76,7 +76,7 @@ app.get('/arcgis/rest/services/Nominatim/GeocodeServer/suggest', async (req, res
 
         const suggestions = response.data.map((item, index) => ({
             text: item.display_name,
-            magicKey: `NOM_${index}`, // ID requerido por el widget
+            magicKey: `NOM_${index}`,
             isCollection: false
         }));
 
@@ -87,46 +87,87 @@ app.get('/arcgis/rest/services/Nominatim/GeocodeServer/suggest', async (req, res
 });
 
 // ======================================================================
-// 2. RUTAS (Disfraz de OSRM a Esri Network Analyst)
+// 2. RUTAS (EL CLON PERFECTO DE ESRI NASERVER)
 // ======================================================================
-const networkAttributesExactos = [
-    { name: "TravelTime", usageType: "esriNAUTCost", dataType: "esriNADTDouble", units: "esriNAUMinutes" },
-    { name: "Kilometers", usageType: "esriNAUTCost", dataType: "esriNADTDouble", units: "esriNAUKilometers" }
-];
-const travelModesExactos = [
-    { id: "1", name: "Tiempo de conducción", type: "AUTOMOBILE", impedanceAttributeName: "TravelTime", timeAttributeName: "TravelTime", distanceAttributeName: "Kilometers" },
-    { id: "5", name: "Tiempo a pie", type: "WALK", impedanceAttributeName: "TravelTime", timeAttributeName: "TravelTime", distanceAttributeName: "Kilometers" }
+const esriTravelModes = [
+    {
+        "id": "FEgifRtFndKNcJMJ", // ID Real de Driving en ArcGIS
+        "name": "Driving Time",
+        "description": "Models the movement of cars and other similar small automobiles.",
+        "type": "AUTOMOBILE",
+        "impedanceAttributeName": "TravelTime",
+        "timeAttributeName": "TravelTime",
+        "distanceAttributeName": "Kilometers",
+        "useHierarchy": true,
+        "uTurnPolicy": "ALLOW_DEAD_ENDS_AND_INTERSECTIONS_ONLY",
+        "simplificationToleranceUnits": "esriMeters",
+        "simplificationTolerance": 10
+    },
+    {
+        "id": "caFAgoThrvUpkFBW", // ID Real de Walking en ArcGIS
+        "name": "Walking Time",
+        "description": "Follows paths and roads that allow pedestrian traffic.",
+        "type": "WALK",
+        "impedanceAttributeName": "WalkTime",
+        "timeAttributeName": "WalkTime",
+        "distanceAttributeName": "Kilometers",
+        "useHierarchy": false,
+        "uTurnPolicy": "ALLOW_DEAD_ENDS_AND_INTERSECTIONS_ONLY",
+        "simplificationToleranceUnits": "esriMeters",
+        "simplificationTolerance": 2
+    }
 ];
 
-// Pasaporte del Servidor
+const esriNetworkAttributes = [
+    { "name": "TravelTime", "usageType": "esriNAUTCost", "dataType": "esriNADTDouble", "units": "esriNAUMinutes" },
+    { "name": "WalkTime", "usageType": "esriNAUTCost", "dataType": "esriNADTDouble", "units": "esriNAUMinutes" },
+    { "name": "Kilometers", "usageType": "esriNAUTCost", "dataType": "esriNADTDouble", "units": "esriNAUKilometers" }
+];
+
+const esriMetadata = {
+    "currentVersion": 10.81,
+    "layerName": "Route_World",
+    "layerType": "esriNAServerRouteLayer",
+    "routeLayerName": "Route_World",
+    "impedance": "TravelTime",
+    "distanceUnits": "esriKilometers",
+    "restrictUTurns": "esriNFSBAllowBacktrack",
+    "outputLineType": "esriNAOutputLineTrueShape",
+    "hasZ": false,
+    "hasM": false,
+    "supportsStartTime": true,
+    "timeZoneForTimeWindows": "esriNTSLocal",
+    "trafficSupport": "esriNTSLiveAndHistorical",
+    "directionsSupported": true,
+    "directionsLengthUnits": "esriNAUMiles",
+    "directionsTimeAttributeName": "TravelTime",
+    "supportedDirectionsLanguages": ["es", "en"],
+    "defaultTravelMode": "FEgifRtFndKNcJMJ",
+    "supportedTravelModes": esriTravelModes,
+    "networkAttributes": esriNetworkAttributes,
+    "capabilities": "Route,NetworkAnalysis",
+    "spatialReference": { "wkid": 4326, "latestWkid": 4326 }
+};
+
+// Pasaporte del NAServer (Carpeta principal, sin layerType)
 app.get('/arcgis/rest/services/World/Route/NAServer', (req, res) => {
-    res.json({
-        currentVersion: 10.81, serviceDescription: "OSRM Routing Service Proxy",
-        routeLayers: ["Route_World"], serviceAreaLayers: [], closestFacilityLayers: [],
-        syncLocationDirLayers: [], asyncLocationDirLayers: [], defaultTravelMode: "Tiempo de conducción",
-        supportedTravelModes: travelModesExactos, networkAttributes: networkAttributesExactos,
-        capabilities: "Route,NetworkAnalysis", spatialReference: { wkid: 4326, latestWkid: 4326 }, resultMapServerName: ""
-    });
+    let baseMetadata = { ...esriMetadata };
+    delete baseMetadata.layerType;
+    baseMetadata.routeLayers = ["Route_World"];
+    baseMetadata.serviceAreaLayers = [];
+    baseMetadata.closestFacilityLayers = [];
+    res.json(baseMetadata);
 });
 
-// Pasaporte de la Capa
+// Pasaporte de la Capa de Rutas
 app.get('/arcgis/rest/services/World/Route/NAServer/Route_World', (req, res) => {
-    res.json({
-        currentVersion: 10.81, layerName: "Route_World", layerType: "esriNAServerRouteLayer", routeLayerName: "Route_World",
-        impedance: "TravelTime", distanceUnits: "esriKilometers", restrictUTurns: "esriNFSBAllowBacktrack",
-        outputLineType: "esriNAOutputLineTrueShape", hasZ: false, hasM: false,
-        supportsStartTime: true, timeZoneForTimeWindows: "esriNTSLocal", trafficSupport: "esriNTSNone",
-        defaultTravelMode: "Tiempo de conducción", supportedTravelModes: travelModesExactos,
-        networkAttributes: networkAttributesExactos, directionsSupported: true,
-        supportedDirectionsLanguages: ["es", "en"], capabilities: "Route,NetworkAnalysis",
-        spatialReference: { wkid: 4326, latestWkid: 4326 }
-    });
+    res.json(esriMetadata);
 });
 
-// Motor de Cálculo (/solve)
+// El Motor /solve 
 app.all('/arcgis/rest/services/World/Route/NAServer/Route_World/solve', async (req, res) => {
     const stopsParam = req.query.stops || req.body.stops; 
-    if (!stopsParam) return res.status(400).json({ error: "Faltan paradas" });
+    if (!stopsParam) return res.status(400).json({ error: "Missing stops parameter" });
 
     let osrmStops = "";
     try {
@@ -134,21 +175,23 @@ app.all('/arcgis/rest/services/World/Route/NAServer/Route_World/solve', async (r
         if (stopsJson.features && stopsJson.features.length > 0) {
             let coords = stopsJson.features.map(f => `${f.geometry.x},${f.geometry.y}`);
             osrmStops = coords.join(';');
+        } else {
+            return res.json({ messages: ["Invalid stops structure"] });
         }
     } catch (e) {
         osrmStops = String(stopsParam).replace(/;/g, '|').replace(/\|/g, ';');
     }
 
-    if (!osrmStops || !osrmStops.includes(',')) return res.json({ messages: ["Formato de paradas no reconocido"] });
-
     let modeString = String(req.query.travelMode || req.body.travelMode || "");
-    let profile = (modeString.includes("5") || modeString.includes("WALK")) ? 'foot' : 'driving';
+    let profile = (modeString.includes("WALK") || modeString.includes("caFAgoThrvUpkFBW")) ? 'foot' : 'driving';
 
     try {
-        const osrmUrl = `http://router.project-osrm.org/route/v1/${profile}/${osrmStops}?overview=full&geometries=geojson`;
+        const osrmUrl = `http://router.project-osrm.org/route/v1/${profile}/${osrmStops}?overview=full&geometries=geojson&steps=true`;
         const response = await axios.get(osrmUrl);
 
-        if (!response.data.routes || response.data.routes.length === 0) return res.json({ messages: ["No se encontró ruta"] });
+        if (!response.data.routes || response.data.routes.length === 0) {
+            return res.json({ messages: [{ type: 50, description: "No route found." }] });
+        }
 
         const route = response.data.routes[0];
         const minutes = route.duration / 60;
@@ -157,13 +200,28 @@ app.all('/arcgis/rest/services/World/Route/NAServer/Route_World/solve', async (r
         res.json({
             messages: [],
             routes: {
+                fieldAliases: { "ObjectID": "ObjectID", "Name": "Name", "TravelTime": "TravelTime", "Kilometers": "Kilometers" },
+                geometryType: "esriGeometryPolyline",
                 spatialReference: { wkid: 4326, latestWkid: 4326 },
-                features: [{ attributes: { Name: "Ruta OSRM", TravelTime: minutes, Total_TravelTime: minutes, Kilometers: kilometers, Total_Kilometers: kilometers }, geometry: { paths: [route.geometry.coordinates], spatialReference: { wkid: 4326, latestWkid: 4326 } } }]
+                features: [{ 
+                    attributes: { "ObjectID": 1, "Name": "OSRM Route", "TravelTime": minutes, "Kilometers": kilometers }, 
+                    geometry: { paths: [route.geometry.coordinates], spatialReference: { wkid: 4326, latestWkid: 4326 } } 
+                }]
             },
-            directions: [{ routeId: 1, routeName: "Ruta", summary: { totalLength: kilometers, totalTime: minutes, totalDriveTime: minutes }, features: [{ attributes: { text: "Siga la ruta trazada.", length: kilometers, time: minutes, maneuverType: "esriDMTUnknown" } }] }]
+            directions: [{ 
+                routeId: 1, 
+                routeName: "OSRM Route", 
+                summary: { totalLength: kilometers, totalTime: minutes, totalDriveTime: minutes }, 
+                features: [{ 
+                    attributes: { text: "Siga la ruta calculada.", length: kilometers, time: minutes, maneuverType: "esriDMTUnknown" },
+                    compressedGeometry: ""
+                }] 
+            }]
         });
-    } catch (error) { res.status(500).json({ error: "Error conectando con OSRM" }); }
+    } catch (error) { 
+        res.status(500).json({ error: "OSRM Server Error" }); 
+    }
 });
 
 const port = process.env.PORT || 10000;
-app.listen(port, () => console.log(`Proxy Total (Nominatim + Suggest + Rutas) activo en puerto ${port}`));
+app.listen(port, () => console.log(`Proxy Total (Nominatim + OSRM Clonado) activo en puerto ${port}`));
