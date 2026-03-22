@@ -41,7 +41,7 @@ app.get('/arcgis/rest/services/Nominatim/GeocodeServer/findAddressCandidates', a
 });
 
 // ======================================================================
-// 2. RUTAS CLON PREMIUM (Rellenando la UI del Widget)
+// 2. RUTAS: DISFRAZ DE "WORLD ROUTING SERVICE" DE ESRI
 // ======================================================================
 
 const networkAttributesExactos = [
@@ -49,7 +49,6 @@ const networkAttributesExactos = [
     { name: "Kilometers", usageType: "esriNAUTCost", dataType: "esriNADTDouble", units: "esriNAUKilometers" }
 ];
 
-// AQUÍ ESTÁ LA MAGIA PARA RELLENAR TU PRIMERA FOTO:
 const travelModesExactos = [
     { id: "1", name: "Tiempo de conducción", type: "AUTOMOBILE", impedanceAttributeName: "TravelTime", timeAttributeName: "TravelTime", distanceAttributeName: "Kilometers" },
     { id: "2", name: "Distancia de conducción", type: "AUTOMOBILE", impedanceAttributeName: "Kilometers", timeAttributeName: "TravelTime", distanceAttributeName: "Kilometers" },
@@ -59,21 +58,21 @@ const travelModesExactos = [
     { id: "6", name: "Distancia a pie", type: "WALK", impedanceAttributeName: "Kilometers", timeAttributeName: "TravelTime", distanceAttributeName: "Kilometers" }
 ];
 
-// AQUÍ ESTÁ LA MAGIA PARA RELLENAR TU SEGUNDA FOTO (supportsStartTime):
+// Configuración disfrazada como "Route_World"
 const configuracionRuta = {
     currentVersion: 10.81,
-    layerName: "Route",
+    layerName: "Route_World",             // <-- DISFRAZ: Nombre idéntico al de Esri
     layerType: "esriNAServerRouteLayer", 
-    routeLayerName: "Route",
+    routeLayerName: "Route_World",        // <-- DISFRAZ: Nombre idéntico al de Esri
     impedance: "TravelTime",
     distanceUnits: "esriKilometers",
     restrictUTurns: "esriNFSBAllowBacktrack",
     outputLineType: "esriNAOutputLineTrueShape",
-    supportsStartTime: true,               // <-- ACTIVA EL MENÚ "HORA DE SALIDA"
-    timeZoneForTimeWindows: "esriNTSLocal", // <-- EVITA QUE CHOQUE EL HUSO HORARIO
+    supportsStartTime: true,              
+    timeZoneForTimeWindows: "esriNTSLocal", 
     trafficSupport: "esriNTSNone",          
     defaultTravelMode: "Tiempo de conducción",
-    supportedTravelModes: travelModesExactos, // <-- RELLENA EL MENÚ "MODOS DE VIAJE"
+    supportedTravelModes: travelModesExactos, 
     networkAttributes: networkAttributesExactos,
     directionsSupported: true,                  
     supportedDirectionsLanguages: ["es", "en"], 
@@ -81,31 +80,30 @@ const configuracionRuta = {
     spatialReference: { wkid: 4326, latestWkid: 4326 }
 };
 
-// Pasaporte Raíz (NAServer)
-app.get('/arcgis/rest/services/OSRM/NAServer', (req, res) => {
+// 2.1 Pasaporte Raíz (World/Route/NAServer)
+app.get('/arcgis/rest/services/World/Route/NAServer', (req, res) => {
     res.json({
         ...configuracionRuta,
-        routeLayers: ["Route"],
+        routeLayers: ["Route_World"],
         serviceAreaLayers: [],      
         closestFacilityLayers: [] 
     });
 });
 
-// Pasaporte de la Capa (Route)
-app.get('/arcgis/rest/services/OSRM/NAServer/Route', (req, res) => {
+// 2.2 Pasaporte de la Capa (World/Route/NAServer/Route_World)
+app.get('/arcgis/rest/services/World/Route/NAServer/Route_World', (req, res) => {
     res.json(configuracionRuta);
 });
 
-// Motor de Cálculo (/solve)
-app.get('/arcgis/rest/services/OSRM/NAServer/Route/solve', async (req, res) => {
+// 2.3 Motor de Cálculo (World/Route/NAServer/Route_World/solve)
+app.get('/arcgis/rest/services/World/Route/NAServer/Route_World/solve', async (req, res) => {
     const stops = req.query.stops; 
     if (!stops) return res.status(400).json({ error: "Faltan paradas" });
 
-    // Verificamos qué eligió el usuario en el menú desplegable
     let modeString = String(req.query.travelMode || "");
-    let profile = 'driving'; // Por defecto Auto o Camión
+    let profile = 'driving'; 
     if (modeString.includes("5") || modeString.includes("6") || modeString.includes("pie") || modeString.includes("WALK")) {
-        profile = 'foot'; // Cambia a Peatón si elige "A pie"
+        profile = 'foot'; 
     }
 
     try {
@@ -127,7 +125,7 @@ app.get('/arcgis/rest/services/OSRM/NAServer/Route/solve', async (req, res) => {
                 spatialReference: { wkid: 4326, latestWkid: 4326 },
                 features: [{
                     attributes: {
-                        Name: "Ruta OSRM",
+                        Name: "Ruta Generada",
                         TravelTime: minutes,
                         Total_TravelTime: minutes,
                         Kilometers: kilometers,
@@ -152,4 +150,4 @@ app.get('/arcgis/rest/services/OSRM/NAServer/Route/solve', async (req, res) => {
 });
 
 const port = process.env.PORT || 8080;
-app.listen(port, () => console.log(`Proxy (Geocodificador + UI de Rutas) activo`));
+app.listen(port, () => console.log(`Proxy (Geocodificador + Disfraz World Routing) activo`));
