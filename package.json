@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "main": "index.js",
   "dependencies": {
-    "koop": "^5.0.0",
-    "koop-provider-osrm": "^1.0.1",
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "axios": "^1.6.0",
+    "cors": "^2.8.5"
   },
   "scripts": {
     "start": "node index.js"
