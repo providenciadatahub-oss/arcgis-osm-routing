@@ -6,10 +6,8 @@ const app = express();
 app.use(cors());
 
 // ======================================================================
-// 1. SECCIÓN DE GEOCODIFICACIÓN (Buscador de Direcciones con Nominatim)
+// 1. GEOCODIFICADOR (Buscador Nominatim)
 // ======================================================================
-
-// Pasaporte del Geocodificador
 app.get('/arcgis/rest/services/Nominatim/GeocodeServer', (req, res) => {
     res.json({
         currentVersion: 10.81,
@@ -17,9 +15,7 @@ app.get('/arcgis/rest/services/Nominatim/GeocodeServer', (req, res) => {
         addressTypes: ["StreetAddress"],
         capabilities: "Geocode",
         spatialReference: { wkid: 4326, latestWkid: 4326 },
-        singleLineAddressField: { 
-            name: "SingleLine", type: "esriFieldTypeString", alias: "Single Line Input" 
-        },
+        singleLineAddressField: { name: "SingleLine", type: "esriFieldTypeString", alias: "Single Line Input" },
         candidateFields: [
             { name: "Shape", type: "esriFieldTypeGeometry", alias: "Shape" },
             { name: "Match_addr", type: "esriFieldTypeString", alias: "Match_addr" }
@@ -27,7 +23,6 @@ app.get('/arcgis/rest/services/Nominatim/GeocodeServer', (req, res) => {
     });
 });
 
-// Motor de búsqueda
 app.get('/arcgis/rest/services/Nominatim/GeocodeServer/findAddressCandidates', async (req, res) => {
     const query = req.query.SingleLine || req.query.address || "";
     if (!query) return res.json({ spatialReference: { wkid: 4326 }, candidates: [] });
@@ -51,34 +46,43 @@ app.get('/arcgis/rest/services/Nominatim/GeocodeServer/findAddressCandidates', a
 });
 
 // ======================================================================
-// 2. SECCIÓN DE RUTAS (Network Analysis con OSRM)
+// 2. RUTAS (El Fix para "Incompatible")
 // ======================================================================
 
-// Pasaporte Raíz de Rutas
-app.get('/osrm/rest/services/OSRM/NAServer', (req, res) => {
+// Pasaporte Raíz (NAServer)
+app.get('/arcgis/rest/services/OSRM/NAServer', (req, res) => {
     res.json({
         currentVersion: 10.81,
         serviceDescription: "OSRM Routing Service",
         routeLayers: ["Route"],
-        capabilities: "Route"
+        capabilities: "Route,NetworkAnalysis"
     });
 });
 
-// Pasaporte de la Capa de Ruta
-app.get('/osrm/rest/services/OSRM/NAServer/Route', (req, res) => {
+// Pasaporte de la Capa (Route) - ¡AQUÍ ESTÁ LO QUE EXIGE EXPERIENCE BUILDER!
+app.get('/arcgis/rest/services/OSRM/NAServer/Route', (req, res) => {
     res.json({
         currentVersion: 10.81,
         layerName: "Route",
-        defaultTravelMode: "Driving",
         capabilities: "Route",
-        networkDatasetName: "Routing_ND"
+        defaultTravelMode: "Driving",
+        // Sin esto, Experience Builder dice "Incompatible":
+        supportedTravelModes: [
+            {
+                id: "1",
+                name: "Driving",
+                description: "Conducción en automóvil",
+                type: "AUTOMOBILE"
+            }
+        ],
+        spatialReference: { wkid: 4326, latestWkid: 4326 }
     });
 });
 
-// Motor de Cálculo de Rutas
-app.get('/osrm/rest/services/OSRM/NAServer/Route/solve', async (req, res) => {
+// Motor de Cálculo
+app.get('/arcgis/rest/services/OSRM/NAServer/Route/solve', async (req, res) => {
     const stops = req.query.stops; 
-    if (!stops) return res.status(400).json({ error: "Faltan paradas (stops)" });
+    if (!stops) return res.status(400).json({ error: "Faltan paradas" });
 
     try {
         const cleanStops = stops.replace(/;/g, '|'); 
@@ -109,9 +113,9 @@ app.get('/osrm/rest/services/OSRM/NAServer/Route/solve', async (req, res) => {
             }
         });
     } catch (error) {
-        res.status(500).json({ error: "Error de red en Routing" });
+        res.status(500).json({ error: "Error en Routing" });
     }
 });
 
 const port = process.env.PORT || 8080;
-app.listen(port, () => console.log(`Proxy Total (Geocodificador + Rutas) activo en puerto ${port}`));
+app.listen(port, () => console.log(`Proxy (Geocodificador + Rutas ArcGIS) activo`));
