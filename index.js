@@ -1,5 +1,5 @@
-const Koop = require('koop') // <--- Cambiado de @koopjs/koop a koop
-const osrm = require('@koopjs/provider-osrm')
+const Koop = require('koop') 
+const osrm = require('koop-provider-osrm') // <--- Nombre actualizado
 const express = require('express')
 
 const koop = new Koop()
