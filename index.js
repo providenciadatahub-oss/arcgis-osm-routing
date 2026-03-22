@@ -8,17 +8,14 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.json({ limit: '50mb' }));
 
 // ======================================================================
-// 0. EL PING DE SEGURIDAD PARA EXPERIENCE BUILDER
+// 0. EL PING DE SEGURIDAD
 // ======================================================================
 app.get('/arcgis/rest/info', (req, res) => {
     res.json({
         currentVersion: 10.81,
         fullVersion: "10.8.1",
-        owningSystemUrl: "https://arcgis-osm-proxy.onrender.com",
-        authInfo: { 
-            isTokenBasedSecurity: false,
-            tokenServicesUrl: ""
-        }
+        owningSystemUrl: "https://arcgis-osm-routing.onrender.com",
+        authInfo: { isTokenBasedSecurity: false, tokenServicesUrl: "" }
     });
 });
 
@@ -49,7 +46,7 @@ app.get('/arcgis/rest/services/Nominatim/GeocodeServer/findAddressCandidates', a
 });
 
 // ======================================================================
-// 2. RUTAS: DISFRAZ DE "WORLD ROUTING SERVICE"
+// 2. RUTAS: DISFRAZ DE "WORLD ROUTING SERVICE" (CORREGIDO)
 // ======================================================================
 const networkAttributesExactos = [
     { name: "TravelTime", usageType: "esriNAUTCost", dataType: "esriNADTDouble", units: "esriNAUMinutes" },
@@ -60,19 +57,52 @@ const travelModesExactos = [
     { id: "5", name: "Tiempo a pie", type: "WALK", impedanceAttributeName: "TravelTime", timeAttributeName: "TravelTime", distanceAttributeName: "Kilometers" }
 ];
 
-const configuracionRuta = {
-    currentVersion: 10.81, layerName: "Route_World", layerType: "esriNAServerRouteLayer", routeLayerName: "Route_World",
-    impedance: "TravelTime", distanceUnits: "esriKilometers", restrictUTurns: "esriNFSBAllowBacktrack",
-    outputLineType: "esriNAOutputLineTrueShape", supportsStartTime: true, timeZoneForTimeWindows: "esriNTSLocal", 
-    trafficSupport: "esriNTSNone", defaultTravelMode: "Tiempo de conducción",
-    supportedTravelModes: travelModesExactos, networkAttributes: networkAttributesExactos,
-    directionsSupported: true, supportedDirectionsLanguages: ["es", "en"], 
-    capabilities: "Route,NetworkAnalysis", spatialReference: { wkid: 4326, latestWkid: 4326 }
-};
+// 2.1 PASAPORTE DEL SERVIDOR (No tiene layerType)
+app.get('/arcgis/rest/services/World/Route/NAServer', (req, res) => {
+    res.json({
+        currentVersion: 10.81,
+        serviceDescription: "OSRM Routing Service Proxy",
+        routeLayers: ["Route_World"],
+        serviceAreaLayers: [],
+        closestFacilityLayers: [],
+        syncLocationDirLayers: [],
+        asyncLocationDirLayers: [],
+        defaultTravelMode: "Tiempo de conducción",
+        supportedTravelModes: travelModesExactos,
+        networkAttributes: networkAttributesExactos,
+        capabilities: "Route,NetworkAnalysis",
+        spatialReference: { wkid: 4326, latestWkid: 4326 },
+        resultMapServerName: ""
+    });
+});
 
-app.get('/arcgis/rest/services/World/Route/NAServer', (req, res) => res.json({ ...configuracionRuta, routeLayers: ["Route_World"], serviceAreaLayers: [], closestFacilityLayers: [] }));
-app.get('/arcgis/rest/services/World/Route/NAServer/Route_World', (req, res) => res.json(configuracionRuta));
+// 2.2 PASAPORTE DE LA CAPA (Sí tiene layerType y variables de geometría)
+app.get('/arcgis/rest/services/World/Route/NAServer/Route_World', (req, res) => {
+    res.json({
+        currentVersion: 10.81,
+        layerName: "Route_World",
+        layerType: "esriNAServerRouteLayer",
+        routeLayerName: "Route_World",
+        impedance: "TravelTime",
+        distanceUnits: "esriKilometers",
+        restrictUTurns: "esriNFSBAllowBacktrack",
+        outputLineType: "esriNAOutputLineTrueShape",
+        hasZ: false,  // <-- NUEVO: Obligatorio para ExB
+        hasM: false,  // <-- NUEVO: Obligatorio para ExB
+        supportsStartTime: true,
+        timeZoneForTimeWindows: "esriNTSLocal",
+        trafficSupport: "esriNTSNone",
+        defaultTravelMode: "Tiempo de conducción",
+        supportedTravelModes: travelModesExactos,
+        networkAttributes: networkAttributesExactos,
+        directionsSupported: true,
+        supportedDirectionsLanguages: ["es", "en"],
+        capabilities: "Route,NetworkAnalysis",
+        spatialReference: { wkid: 4326, latestWkid: 4326 }
+    });
+});
 
+// 2.3 MOTOR DE CÁLCULO
 app.all('/arcgis/rest/services/World/Route/NAServer/Route_World/solve', async (req, res) => {
     const stopsParam = req.query.stops || req.body.stops; 
     if (!stopsParam) return res.status(400).json({ error: "Faltan paradas" });
@@ -115,4 +145,4 @@ app.all('/arcgis/rest/services/World/Route/NAServer/Route_World/solve', async (r
 });
 
 const port = process.env.PORT || 8080;
-app.listen(port, () => console.log(`Proxy Total Activo en puerto ${port}`));
+app.listen(port, () => console.log(`Proxy (Geocodificador + POST Ruteo Corregido) activo`));
