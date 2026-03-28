@@ -3,26 +3,24 @@ const axios = require('axios');
 const cors = require('cors');
 const app = express();
 
+// Configuración de CORS total para evitar bloqueos de ArcGIS Online
 app.use(cors({ origin: '*' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.json({ limit: '50mb' }));
 
-// Middleware para forzar que ArcGIS reciba JSON siempre
+// Forzar encabezado JSON en todas las respuestas
 app.use((req, res, next) => {
-    res.header("Content-Type", "application/json; charset=utf-8");
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
     next();
 });
 
-// Función traductora de coordenadas
-function mercatorToLatLon(x, y) {
-    const lon = (x / 20037508.34) * 180;
-    let lat = (y / 20037508.34) * 180;
-    lat = 180 / Math.PI * (2 * Math.atan(Math.exp(lat * Math.PI / 180)) - Math.PI / 2);
-    return { lng: lon.toFixed(6), lat: lat.toFixed(6) };
-}
-
-// Datos de los modos de viaje (Centralizados)
-const travelModesData = {
+// --- METADATOS COMPARTIDOS ---
+const commonMetadata = {
+    currentVersion: 10.81,
+    serviceDescription: "OSRM Routing Proxy",
+    layerName: "Route_World",
+    layerType: "esriNAServerRouteLayer", // CRÍTICO: Esto es lo que busca el widget
+    capabilities: "Route,NetworkAnalysis",
     supportedTravelModes: [
         {
             "id": "FEgifRtFndKNcJMJ",
@@ -31,80 +29,85 @@ const travelModesData = {
             "impedanceAttributeName": "TravelTime",
             "timeAttributeName": "TravelTime",
             "distanceAttributeName": "Kilometers"
-        },
-        {
-            "id": "caFAgoThrvUpkFBW",
-            "name": "Walking Time",
-            "type": "WALK",
-            "impedanceAttributeName": "WalkTime",
-            "timeAttributeName": "WalkTime",
-            "distanceAttributeName": "Kilometers"
         }
     ],
-    defaultTravelMode: "FEgifRtFndKNcJMJ"
+    defaultTravelMode: "FEgifRtFndKNcJMJ",
+    spatialReference: { wkid: 4326, latestWkid: 4326 }
 };
 
-// Endpoints de información
-app.get('/arcgis/rest/info', (req, res) => res.json({ currentVersion: 10.81, fullVersion: "10.8.1", authInfo: { isTokenBasedSecurity: false } }));
+// --- ENDPOINTS DE VALIDACIÓN ---
 
-// Endpoints de metadatos del servicio
-const serviceMetadata = {
-    currentVersion: 10.81,
-    layerName: "Route_World",
-    layerType: "esriNAServerRouteLayer",
-    capabilities: "Route,NetworkAnalysis",
-    supportedTravelModes: travelModesData.supportedTravelModes,
-    defaultTravelMode: travelModesData.defaultTravelMode,
-    spatialReference: { wkid: 4326 }
-};
-
-app.get(['/arcgis/rest/services/World/Route/NAServer', '/arcgis/rest/services/World/Route/NAServer/Route_World'], (req, res) => {
-    res.json(serviceMetadata);
+// 1. Info general
+app.get('/arcgis/rest/info', (req, res) => {
+    res.json({ currentVersion: 10.81, fullVersion: "10.8.1", authInfo: { isTokenBasedSecurity: false } });
 });
 
-// --- EL PUNTO CRÍTICO: RetrieveTravelModes ---
+// 2. Metadatos del NAServer (Cualquier variación de URL)
+app.get([
+    '/arcgis/rest/services/World/Route/NAServer',
+    '/arcgis/rest/services/World/Route/NAServer/Route_World'
+], (req, res) => {
+    res.json(commonMetadata);
+});
+
+// 3. El validador de Modos de Viaje (Lo que causa el error "Not Supported")
 app.get([
     '/arcgis/rest/services/World/Route/NAServer/retrieveTravelModes',
     '/arcgis/rest/services/World/Route/NAServer/Route_World/retrieveTravelModes'
 ], (req, res) => {
-    res.json(travelModesData);
+    res.json({
+        supportedTravelModes: commonMetadata.supportedTravelModes,
+        defaultTravelMode: commonMetadata.defaultTravelMode
+    });
 });
 
-// El Motor /solve
+// --- MOTOR DE CÁLCULO /solve ---
 app.all('/arcgis/rest/services/World/Route/NAServer/Route_World/solve', async (req, res) => {
     const stopsParam = req.query.stops || req.body.stops;
-    if (!stopsParam) return res.status(400).json({ error: "Missing stops" });
+    if (!stopsParam) return res.status(400).json({ error: "No stops provided" });
 
-    let osrmStops = "";
     try {
         let stopsJson = typeof stopsParam === 'string' ? JSON.parse(stopsParam) : stopsParam;
+        
+        // Traducción de coordenadas rápida (Web Mercator a WGS84)
         let coords = stopsJson.features.map(f => {
             let x = parseFloat(f.geometry.x);
             let y = parseFloat(f.geometry.y);
-            if (Math.abs(x) > 180) {
-                const conv = mercatorToLatLon(x, y);
-                return `${conv.lng},${conv.lat}`;
+            if (Math.abs(x) > 180) { // Si es Web Mercator
+                const lon = (x / 20037508.34) * 180;
+                let lat = (y / 20037508.34) * 180;
+                lat = 180 / Math.PI * (2 * Math.atan(Math.exp(lat * Math.PI / 180)) - Math.PI / 2);
+                return `${lon.toFixed(6)},${lat.toFixed(6)}`;
             }
             return `${x},${y}`;
-        });
-        osrmStops = coords.join(';');
-    } catch (e) { osrmStops = ""; }
+        }).join(';');
 
-    try {
-        const response = await axios.get(`http://router.project-osrm.org/route/v1/driving/${osrmStops}?overview=full&geometries=geojson`);
-        const route = response.data.routes[0];
+        const osrmRes = await axios.get(`http://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`);
+        const route = osrmRes.data.routes[0];
+
+        // Respuesta en formato Esri JSON estricto
         res.json({
             routes: {
                 geometryType: "esriGeometryPolyline",
-                spatialReference: { wkid: 4326 },
+                spatialReference: { wkid: 102100 }, // El widget espera que le devolvamos metros
                 features: [{
                     attributes: { ObjectID: 1, TravelTime: route.duration / 60, Kilometers: route.distance / 1000 },
-                    geometry: { paths: [route.geometry.coordinates] }
+                    geometry: { 
+                        // OSRM devuelve [lon, lat], ArcGIS espera [x, y] en metros para dibujar bien
+                        paths: [route.geometry.coordinates.map(pt => {
+                            const x = pt[0] * 20037508.34 / 180;
+                            let y = Math.log(Math.tan((90 + pt[1]) * Math.PI / 360)) / (Math.PI / 180);
+                            y = y * 20037508.34 / 180;
+                            return [x, y];
+                        })]
+                    }
                 }]
             }
         });
-    } catch (error) { res.status(500).json({ error: "OSRM Error" }); }
+    } catch (e) {
+        res.status(500).json({ error: "Error en el cálculo" });
+    }
 });
 
 const port = process.env.PORT || 10000;
-app.listen(port, () => console.log(`Servidor activo en puerto ${port}`));
+app.listen(port, () => console.log(`Proxy listo para ArcGIS en puerto ${port}`));
