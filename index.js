@@ -3,61 +3,70 @@ const axios = require('axios');
 const cors = require('cors');
 const app = express();
 
-app.use(cors({ origin: '*' }));
+app.use(cors()); // Permite que ArcGIS Online lea tu servidor
 app.use(express.json());
 
-// Forzar encabezados de ArcGIS en cada respuesta
-app.use((req, res, next) => {
-    res.header("Content-Type", "application/json; charset=utf-8");
-    res.header("Access-Control-Allow-Origin", "*");
-    console.log(`Petición de ArcGIS detectada: ${req.url}`);
-    next();
+const PORT = process.env.PORT || 3000;
+
+// Endpoint base para que el widget de ArcGIS valide el servicio
+app.get('/arcgis/rest/services/OSM/NAServer/Route', (req, res) => {
+    res.json({
+        "currentVersion": 10.81,
+        "serviceDescription": "Proxy OSM para ArcGIS",
+        "capabilities": "Route",
+        "layerType": "NetworkAnalysisLayer",
+        "supportedQueryFormats": "JSON",
+        "maxRecordCount": 1000
+    });
 });
 
-// Datos de viaje que el Widget exige ver
-const travelModes = {
-    supportedTravelModes: [{
-        "id": "FEgifRtFndKNcJMJ",
-        "name": "Driving Time",
-        "type": "AUTOMOBILE",
-        "impedanceAttributeName": "TravelTime",
-        "timeAttributeName": "TravelTime",
-        "distanceAttributeName": "Kilometers"
-    }],
-    defaultTravelMode: "FEgifRtFndKNcJMJ"
-};
+// El traductor de la operación "solve"
+app.get('/arcgis/rest/services/OSM/NAServer/Route/solve', async (req, res) => {
+    try {
+        const stops = req.query.stops; // Formato: "-3.7,40.4;-3.6,40.4"
+        if (!stops) return res.status(400).json({ error: "No se enviaron paradas (stops)" });
 
-const metadata = {
-    currentVersion: 10.81,
-    layerName: "Route_World",
-    layerType: "esriNAServerRouteLayer",
-    capabilities: "Route,NetworkAnalysis",
-    ...travelModes,
-    spatialReference: { wkid: 102100 }
-};
+        // 1. Llamar a OSRM (Gratis)
+        const osrmUrl = `https://router.project-osrm.org{stops}?geometries=geojson&overview=full&steps=true`;
+        const response = await axios.get(osrmUrl);
+        
+        if (!response.data.routes || response.data.routes.length === 0) {
+            return res.json({ "error": { "code": 400, "message": "No se encontró ruta" } });
+        }
 
-// --- RUTAS DE VALIDACIÓN (Si falta una, el widget falla) ---
+        const route = response.data.routes[0];
 
-app.get('/arcgis/rest/info', (req, res) => res.json({ currentVersion: 10.81, authInfo: { isTokenBasedSecurity: false } }));
+        // 2. TRADUCCIÓN al formato NAServer
+        // ArcGIS espera [ [lon, lat], [lon, lat] ] en 'paths'
+        const arcgisResponse = {
+            "routes": {
+                "features": [{
+                    "geometry": {
+                        "paths": [route.geometry.coordinates]
+                    },
+                    "attributes": {
+                        "Name": "Ruta Libre OSM",
+                        "Total_Minutes": route.duration / 60,
+                        "Total_Kilometers": route.distance / 1000
+                    }
+                }]
+            },
+            "directions": [{
+                "features": route.legs[0].steps.map(step => ({
+                    "attributes": {
+                        "text": step.maneuver.instruction,
+                        "length": step.distance / 1000,
+                        "time": step.duration / 60
+                    }
+                }))
+            }]
+        };
 
-// Esta ruta responde a CUALQUIER variante de la URL del NAServer
-app.get([
-    '/arcgis/rest/services/World/Route/NAServer',
-    '/arcgis/rest/services/World/Route/NAServer/',
-    '/arcgis/rest/services/World/Route/NAServer/Route_World',
-    '/arcgis/rest/services/World/Route/NAServer/Route_World/'
-], (req, res) => res.json(metadata));
-
-// Esta ruta responde a la petición secreta del Widget
-app.get([
-    '/arcgis/rest/services/World/Route/NAServer/retrieveTravelModes',
-    '/arcgis/rest/services/World/Route/NAServer/Route_World/retrieveTravelModes'
-], (req, res) => res.json(travelModes));
-
-// --- MOTOR SOLVE (Simplificado para la prueba) ---
-app.all('*/solve', async (req, res) => {
-    res.json({ routes: { features: [] }, messages: [] });
+        res.json(arcgisResponse);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Error interno del proxy" });
+    }
 });
 
-const port = process.env.PORT || 10000;
-app.listen(port, () => console.log(`Proxy ArcGIS en puerto ${port}`));
+app.listen(PORT, () => console.log(`Proxy corriendo en puerto ${PORT}`));
