@@ -6,96 +6,83 @@ const app = express();
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-// Forzar encabezado JSON de ArcGIS
+// Forzar el formato que ArcGIS espera
 app.use((req, res, next) => {
     res.header("Content-Type", "application/json; charset=utf-8");
     next();
 });
 
-// --- DEFINICIÓN DE MODO DE VIAJE (ESTÁNDAR ESRI) ---
-const travelModesData = {
-    supportedTravelModes: [
-        {
-            "id": "FEgifRtFndKNcJMJ",
-            "name": "Auto (OSM)",
-            "type": "AUTOMOBILE",
-            "impedanceAttributeName": "TravelTime",
-            "timeAttributeName": "TravelTime",
-            "distanceAttributeName": "Kilometers",
-            "useHierarchy": true,
-            "restrictionAttributeNames": [],
-            "attributeParameterValues": [],
-            "uTurnPolicy": "esriNFSBAllowBacktrack",
-            "simplificationTolerance": 10,
-            "simplificationToleranceUnits": "esriMeters"
-        }
-    ],
-    defaultTravelMode: "FEgifRtFndKNcJMJ"
-};
+// --- MOTOR DE BÚSQUEDA (NOMINATIM / GEOCODE) ---
+app.get('/arcgis/rest/services/Nominatim/GeocodeServer', (req, res) => {
+    res.json({
+        currentVersion: 10.81,
+        serviceDescription: "Nominatim Engine",
+        capabilities: "Geocode,ReverseGeocode,Suggest",
+        addressTypes: ["StreetAddress", "POI"],
+        spatialReference: { wkid: 102100, latestWkid: 3857 },
+        // Campos que Gravois y Esri exigen
+        candidateFields: [
+            { name: "ResultID", type: "esriFieldTypeInteger" },
+            { name: "Match_addr", type: "esriFieldTypeString" },
+            { name: "Score", type: "esriFieldTypeDouble" }
+        ],
+        singleLineAddressField: { name: "SingleLine", type: "esriFieldTypeString", length: 200 }
+    });
+});
 
-// Metadatos que el Widget lee para validar compatibilidad
-const fullMetadata = {
+// Endpoint de búsqueda (findAddressCandidates)
+app.get('/arcgis/rest/services/Nominatim/GeocodeServer/findAddressCandidates', async (req, res) => {
+    const text = req.query.SingleLine || req.query.address || "";
+    try {
+        const resp = await axios.get(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(text)}&format=json&limit=5`);
+        const candidates = resp.data.map((item, index) => {
+            // Conversión manual a Web Mercator (102100) para ArcGIS
+            const x = parseFloat(item.lon) * 20037508.34 / 180;
+            let y = Math.log(Math.tan((90 + parseFloat(item.lat)) * Math.PI / 360)) / (Math.PI / 180);
+            y = y * 20037508.34 / 180;
+
+            return {
+                address: item.display_name,
+                location: { x, y },
+                score: 100,
+                attributes: { ResultID: index, Match_addr: item.display_name }
+            };
+        });
+        res.json({ spatialReference: { wkid: 102100 }, candidates });
+    } catch (e) { res.json({ candidates: [] }); }
+});
+
+// --- MOTOR DE RUTAS (NASERVER) ---
+const routeMetadata = {
     currentVersion: 10.81,
-    serviceDescription: "Proxy OSRM para ArcGIS Online",
     layerName: "Route_World",
     layerType: "esriNAServerRouteLayer",
     capabilities: "Route,NetworkAnalysis",
-    ...travelModesData,
-    spatialReference: { wkid: 102100, latestWkid: 3857 }
+    supportedTravelModes: [{
+        "id": "1",
+        "name": "Auto OSM",
+        "type": "AUTOMOBILE",
+        "impedanceAttributeName": "TravelTime"
+    }],
+    defaultTravelMode: "1",
+    spatialReference: { wkid: 102100 }
 };
 
-// --- ENDPOINTS DE VALIDACIÓN ---
+app.get(['/arcgis/rest/services/World/Route/NAServer', '/arcgis/rest/services/World/Route/NAServer/Route_World'], (req, res) => res.json(routeMetadata));
+
+// Endpoint crítico para Experience Builder
+app.get('*/retrieveTravelModes', (req, res) => res.json({
+    supportedTravelModes: routeMetadata.supportedTravelModes,
+    defaultTravelMode: "1"
+}));
+
+// El motor que dibuja la ruta
+app.all('*/solve', async (req, res) => {
+    // Aquí implementamos la lógica de OSRM que ya tienes
+    res.json({ routes: { geometryType: "esriGeometryPolyline", features: [] } });
+});
 
 app.get('/arcgis/rest/info', (req, res) => res.json({ currentVersion: 10.81, authInfo: { isTokenBasedSecurity: false } }));
 
-// Respondemos a todas las rutas que el widget suele "escanear"
-app.get([
-    '/arcgis/rest/services/World/Route/NAServer',
-    '/arcgis/rest/services/World/Route/NAServer/Route_World',
-    '/arcgis/rest/services/World/Route/NAServer/retrieveTravelModes',
-    '/arcgis/rest/services/World/Route/NAServer/Route_World/retrieveTravelModes'
-], (req, res) => {
-    // Si la URL termina en retrieveTravelModes, mandamos solo los modos
-    if (req.url.includes('retrieveTravelModes')) {
-        res.json(travelModesData);
-    } else {
-        res.json(fullMetadata);
-    }
-});
-
-// --- MOTOR SOLVE (Cálculo de Ruta) ---
-app.all('*/solve', async (req, res) => {
-    const stopsParam = req.query.stops || req.body.stops;
-    if (!stopsParam) return res.json({ routes: { features: [] } });
-
-    try {
-        let stopsJson = typeof stopsParam === 'string' ? JSON.parse(stopsParam) : stopsParam;
-        
-        // 1. Convertir de Metros (ArcGIS) a Lat/Lon (OSRM)
-        let coords = stopsJson.features.map(f => {
-            const lon = (f.geometry.x / 20037508.34) * 180;
-            let lat = (y / 20037508.34) * 180; // Simplificado para el ejemplo
-            lat = 180 / Math.PI * (2 * Math.atan(Math.exp(lat * Math.PI / 180)) - Math.PI / 2);
-            return `${lon.toFixed(6)},${lat.toFixed(6)}`;
-        }).join(';');
-
-        // 2. Llamada a OSRM
-        const response = await axios.get(`http://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`);
-        const route = response.data.routes[0];
-
-        // 3. Respuesta en formato Esri Polyline
-        res.json({
-            routes: {
-                geometryType: "esriGeometryPolyline",
-                spatialReference: { wkid: 102100 },
-                features: [{
-                    attributes: { ObjectID: 1, TravelTime: route.duration / 60, Kilometers: route.distance / 1000 },
-                    geometry: { paths: [route.geometry.coordinates.map(p => [p[0], p[1]])] } // Aquí iría la conversión a metros
-                }]
-            }
-        });
-    } catch (e) { res.status(500).json({ error: "Solve error" }); }
-});
-
 const port = process.env.PORT || 10000;
-app.listen(port, () => console.log(`Proxy ArcGIS compatible con TravelModes activo`));
+app.listen(port, () => console.log(`Servidor estilo Gravois activo`));
