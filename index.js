@@ -8,6 +8,16 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.json({ limit: '50mb' }));
 
 // ======================================================================
+// NUEVO: TRADUCTOR DE COORDENADAS (Web Mercator a WGS84)
+// ======================================================================
+function mercatorToLatLon(x, y) {
+    const lon = (x / 20037508.34) * 180;
+    let lat = (y / 20037508.34) * 180;
+    lat = 180 / Math.PI * (2 * Math.atan(Math.exp(lat * Math.PI / 180)) - Math.PI / 2);
+    return { lng: lon.toFixed(6), lat: lat.toFixed(6) };
+}
+
+// ======================================================================
 // 0. PING DE SEGURIDAD (Obligatorio para Experience Builder)
 // ======================================================================
 app.get('/arcgis/rest/info', (req, res) => {
@@ -91,7 +101,7 @@ app.get('/arcgis/rest/services/Nominatim/GeocodeServer/suggest', async (req, res
 // ======================================================================
 const esriTravelModes = [
     {
-        "id": "FEgifRtFndKNcJMJ", // ID Real de Driving en ArcGIS
+        "id": "FEgifRtFndKNcJMJ", 
         "name": "Driving Time",
         "description": "Models the movement of cars and other similar small automobiles.",
         "type": "AUTOMOBILE",
@@ -104,7 +114,7 @@ const esriTravelModes = [
         "simplificationTolerance": 10
     },
     {
-        "id": "caFAgoThrvUpkFBW", // ID Real de Walking en ArcGIS
+        "id": "caFAgoThrvUpkFBW", 
         "name": "Walking Time",
         "description": "Follows paths and roads that allow pedestrian traffic.",
         "type": "WALK",
@@ -173,12 +183,28 @@ app.all('/arcgis/rest/services/World/Route/NAServer/Route_World/solve', async (r
     try {
         let stopsJson = typeof stopsParam === 'string' ? JSON.parse(stopsParam) : stopsParam;
         if (stopsJson.features && stopsJson.features.length > 0) {
-            let coords = stopsJson.features.map(f => `${f.geometry.x},${f.geometry.y}`);
+            
+            // MODIFICACIÓN APLICADA: Traducción de Coordenadas
+            let coords = stopsJson.features.map(f => {
+                let x = parseFloat(f.geometry.x);
+                let y = parseFloat(f.geometry.y);
+                
+                // Si vienen en millones (Web Mercator), las pasamos por la fórmula
+                if (Math.abs(x) > 180 || Math.abs(y) > 90) {
+                    const converted = mercatorToLatLon(x, y);
+                    return `${converted.lng},${converted.lat}`;
+                } else {
+                    // Si ya vienen bien, las dejamos tranquilas
+                    return `${x},${y}`;
+                }
+            });
             osrmStops = coords.join(';');
+            
         } else {
             return res.json({ messages: ["Invalid stops structure"] });
         }
     } catch (e) {
+        // Fallback simple por si ArcGIS manda strings en lugar de JSON
         osrmStops = String(stopsParam).replace(/;/g, '|').replace(/\|/g, ';');
     }
 
