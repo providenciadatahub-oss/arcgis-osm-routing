@@ -1,7 +1,7 @@
 {
   "name": "arcgis-osrm-proxy",
   "version": "1.0.0",
-  "description": "Proxy para conectar ArcGIS con OSRM y Nominatim",
+  "description": "Proxy para conectar ArcGIS con OSRM",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
