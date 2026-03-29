@@ -1,13 +1,46 @@
 {
-  "name": "arcgis-osm-proxy",
-  "version": "1.0.0",
-  "main": "index.js",
-  "dependencies": {
-    "express": "^4.18.2",
-    "axios": "^1.6.0",
-    "cors": "^2.8.5"
+  "currentVersion": 10.81,
+  "serviceDescription": "OSRM Network Analysis Service compliant with ArcGIS specification",
+  "layerName": "Route_World",
+  "layerType": "esriNAServerRouteLayer",
+  "routeLayerName": "Route_World",
+  "capabilities": "Route,NetworkAnalysis",
+  "spatialReference": {
+    "wkid": 102100,
+    "latestWkid": 3857
   },
-  "scripts": {
-    "start": "node index.js"
-  }
+  "supportedTravelModes": [
+    {
+      "id": "FEgifRtFndKNcJMJ",
+      "name": "Driving Time",
+      "description": "Models the movement of cars and other similar small automobiles.",
+      "type": "AUTOMOBILE",
+      "impedanceAttributeName": "TravelTime",
+      "timeAttributeName": "TravelTime",
+      "distanceAttributeName": "Kilometers",
+      "uTurnPolicy": "esriNFSBAllowBacktrack",
+      "simplificationTolerance": 10,
+      "simplificationToleranceUnits": "esriMeters"
+    }
+  ],
+  "defaultTravelMode": "FEgifRtFndKNcJMJ",
+  "networkAttributes": [
+    {
+      "name": "TravelTime",
+      "usageType": "esriNAUTCost",
+      "dataType": "esriNADTDouble",
+      "units": "esriNAUMinutes"
+    },
+    {
+      "name": "Kilometers",
+      "usageType": "esriNAUTCost",
+      "dataType": "esriNADTDouble",
+      "units": "esriNAUKilometers"
+    }
+  ],
+  "supportedParameters": "f,stops,travelMode,startTime,findBestSequence,preserveFirstStop,preserveLastStop,returnDirections,returnRoutes,outSR,ignoreInvalidLocations",
+  "directionsSupported": true,
+  "directionsLanguage": "es",
+  "directionsLengthUnits": "esriNAUKilometers",
+  "directionsTimeAttributeName": "TravelTime"
 }
